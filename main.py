@@ -1,66 +1,74 @@
 from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel
-from typing import List
+from typing import Dict, Any
 import uvicorn
 import requests
 
 app = FastAPI(title="Custom Trading Webhook Relay")
 
+# The secret token you put inside your TradingView text message
 API_TOKEN = "VvOIjUt332XVdUeoX8Qmmw"
 
-class AccountConfig(BaseModel):
-    token: str
-    account_id: str
-    risk_percentage: int
-    quantity_multiplier: int
-
-class TradingViewPayload(BaseModel):
-    symbol: str
-    strategy_name: str
-    date: str
-    data: str  
-    quantity: int
-    price: str
-    token: str
-    multiple_accounts: List[AccountConfig]
-
 @app.post("/webhook", status_code=status.HTTP_200_OK)
-async def receive_tradingview_webhook(payload: TradingViewPayload):
-    if payload.token != API_TOKEN:
+async def receive_tradingview_webhook(payload: Dict[str, Any]):
+    # 1. Extract token safely from the incoming message data
+    incoming_token = payload.get("token")
+    
+    if incoming_token != API_TOKEN:
+        print(f"Unauthorized payload attempt blocked. Received token: {incoming_token}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Invalid security token credentials."
         )
     
-    print(f"Verified Alert Received: {payload.strategy_name} - Action: {payload.data.upper()}")
+    print(f"Validated Alert Received! Raw Payload Data: {payload}")
     
-    order_side = payload.data.lower()  
-    order_qty = payload.quantity
+    # 2. Extract action signals flexibly from the data payload
+    # Handles both strategy orders ("buy"/"sell") and raw alert strings
+    action = str(payload.get("data", "buy")).lower()
+    symbol = payload.get("symbol", "ESU2026")
+    quantity = payload.get("quantity", 1)
     
-    # Replace this URL with Lucid/Tradovate's actual API endpoint when ready
-    BROKER_API_URL = "https://api.lucidtrading.com/v1/orders" 
+    # 3. Pull target broker account variables from your multiple account block
+    accounts_list = payload.get("multiple_accounts", [])
+    if not accounts_list:
+        print("Error: No broker account details passed in payload.")
+        return {"status": "error", "message": "Missing account definition block"}
+        
+    broker_token = accounts_list[0].get("token")
+    account_id = accounts_list[0].get("account_id")
+    
+    # 4. Format payload specifically for Tradovate/Lucid's order endpoints
+    # Tradovate endpoints require exact matching parameters: accountId, symbol, action, orderQty, orderType
+    BROKER_API_URL = "https://api.lucidtrading.com/v1/order/placeorder" 
     
     headers = {
-        "Authorization": f"Bearer {payload.multiple_accounts[0].token}",
+        "Authorization": f"Bearer {broker_token}",
         "Content-Type": "application/json"
     }
     
     broker_payload = {
-        "account": payload.multiple_accounts[0].account_id,
-        "action": "BUY" if order_side == "buy" else "SELL",
-        "symbol": payload.symbol,
-        "orderQty": order_qty,
+        "accountId": int(account_id) if str(account_id).isdigit() else account_id,
+        "accountSpec": f"DEMO{account_id}" if "demo" in BROKER_API_URL else str(account_id),
+        "symbol": str(symbol).upper(),
+        "action": "Buy" if "buy" in action else "Sell",
+        "orderQty": int(quantity),
         "orderType": "Market"
     }
     
     try:
+        print(f"Forwarding trade to broker -> Account: {account_id} | Action: {broker_payload['action']}")
         response = requests.post(BROKER_API_URL, json=broker_payload, headers=headers, timeout=5)
+        
         if response.status_code in [200, 201]:
+            print(f"Broker Order Placed Successfully: {response.text}")
             return {"status": "success", "broker_response": response.json()}
         else:
+            print(f"Broker Server Rejected Order Parameters: {response.text}")
             return {"status": "broker_error", "details": response.text}
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Broker transmission failure: {str(e)}")
+        print(f"Network error trying to transmit to broker: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Broker server transmission failure.")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
