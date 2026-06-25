@@ -1,61 +1,66 @@
-//@version=5
-strategy("Cloud Auto-Bracket Strategy", overlay=true, margin_long=0, margin_short=0, max_bars_back=500)
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel
+from typing import List
+import uvicorn
+import requests
 
-// --- Strategy Inputs ---
-tp_ticks = input.int(60, title="Take Profit (Ticks)")
-sl_ticks = input.int(40, title="Initial Stop Loss (Ticks)")
-be_trigger_ticks = input.int(24, title="Profit Trigger for Breakeven (Ticks)")
-be_plus_ticks = input.int(4, title="Breakeven Plus Offset (Ticks)")
+app = FastAPI(title="Custom Trading Webhook Relay")
 
-// --- Indicators ---
-source = close
-bb_length = input.int(20, title="BB Length")
-bb_mult = input.float(2.0, title="BB StdDev")
-rsi_length = input.int(14, title="RSI Length")
+API_TOKEN = "VvOIjUt332XVdUeoX8Qmmw"
 
-[basis, upper, lower] = ta.bb(source, bb_length, bb_mult)
-my_rsi = ta.rsi(source, rsi_length)
+class AccountConfig(BaseModel):
+    token: str
+    account_id: str
+    risk_percentage: int
+    quantity_multiplier: int
 
-// --- FORCED LIVE TIME TRIGGER ---
-// (timenow - time) tracks how close the bar is to your actual computer clock.
-// This keeps the strategy completely empty historically, then flips to TRUE on the live candle.
-is_live_candle = (timenow - time) < 300000 // Within the last 5 minutes
+class TradingViewPayload(BaseModel):
+    symbol: str
+    strategy_name: str
+    date: str
+    data: str  
+    quantity: int
+    price: str
+    token: str
+    multiple_accounts: List[AccountConfig]
 
-long_condition = false
-short_condition = is_live_candle
-
-// --- Trade Execution Logic ---
-if (long_condition and strategy.position_size == 0)
-    strategy.entry("buy", strategy.long, comment="buy")
-
-if (short_condition and strategy.position_size == 0)
-    strategy.entry("sell", strategy.short, comment="sell")
-
-// --- Server-Side Advanced Exit Calculations ---
-if (strategy.position_size > 0)
-    entry_p = strategy.position_avg_price
-    bars_since_entry = ta.barssince(strategy.position_size[1] == 0)
+@app.post("/webhook", status_code=status.HTTP_200_OK)
+async def receive_tradingview_webhook(payload: TradingViewPayload):
+    if payload.token != API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail="Invalid security token credentials."
+        )
     
-    safe_lookback = bars_since_entry > 0 ? math.min(bars_since_entry, 450) : 1
-    highest_high = ta.highest(high, safe_lookback)
-    ticks_in_profit = (highest_high - entry_p) / syminfo.mintick
+    print(f"Verified Alert Received: {payload.strategy_name} - Action: {payload.data.upper()}")
     
-    current_sl = entry_p - (sl_ticks * syminfo.mintick)
-    if (ticks_in_profit >= be_trigger_ticks)
-        current_sl := entry_p + (be_plus_ticks * syminfo.mintick)
-        
-    strategy.exit("close", "buy", limit=entry_p + (tp_ticks * syminfo.mintick), stop=current_sl, comment="close")
+    order_side = payload.data.lower()  
+    order_qty = payload.quantity
+    
+    # Replace this URL with Lucid/Tradovate's actual API endpoint when ready
+    BROKER_API_URL = "https://api.lucidtrading.com/v1/orders" 
+    
+    headers = {
+        "Authorization": f"Bearer {payload.multiple_accounts[0].token}",
+        "Content-Type": "application/json"
+    }
+    
+    broker_payload = {
+        "account": payload.multiple_accounts[0].account_id,
+        "action": "BUY" if order_side == "buy" else "SELL",
+        "symbol": payload.symbol,
+        "orderQty": order_qty,
+        "orderType": "Market"
+    }
+    
+    try:
+        response = requests.post(BROKER_API_URL, json=broker_payload, headers=headers, timeout=5)
+        if response.status_code in [200, 201]:
+            return {"status": "success", "broker_response": response.json()}
+        else:
+            return {"status": "broker_error", "details": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Broker transmission failure: {str(e)}")
 
-if (strategy.position_size < 0)
-    entry_p = strategy.position_avg_price
-    bars_since_entry = ta.barssince(strategy.position_size[1] == 0)
-    
-    safe_lookback = bars_since_entry > 0 ? math.min(bars_since_entry, 450) : 1
-    lowest_low = ta.lowest(low, safe_lookback)
-    ticks_in_profit = (entry_p - lowest_low) / syminfo.mintick
-    
-    current_sl = entry_p + (sl_ticks * syminfo.mintick)
-    if (ticks_in_profit >= be_trigger_ticks)
-        current_sl := entry_p - (be_plus_ticks * syminfo.mintick)
-        
-    strategy.exit("close", "sell", limit=entry_p - (tp_ticks * syminfo.mintick), stop=current_sl, comment="close")
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
