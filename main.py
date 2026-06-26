@@ -23,7 +23,6 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     print(f"Validated Alert Received! Raw Payload Data: {payload}")
     
     # 2. Extract action signals flexibly from the data payload
-    # Handles both strategy orders ("buy"/"sell") and raw alert strings
     action = str(payload.get("data", "buy")).lower()
     symbol = payload.get("symbol", "ESU2026")
     quantity = payload.get("quantity", 1)
@@ -37,18 +36,20 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     broker_token = accounts_list[0].get("token")
     account_id = accounts_list[0].get("account_id")
     
-    # 4. Format payload specifically for Tradovate/Lucid's order endpoints
-    # Tradovate endpoints require exact matching parameters: accountId, symbol, action, orderQty, orderType
-    BROKER_API_URL = "https://api.lucidtrading.com/v1/order/placeorder" 
+    # 4. Corrected Domain URL for Lucid's Live/Simulation Tradovate API Architecture
+    BROKER_API_URL = "https://api.lucidat.com/v1/order/placeorder" 
     
     headers = {
         "Authorization": f"Bearer {broker_token}",
         "Content-Type": "application/json"
     }
     
+    # Safely convert account ID values to prevent parsing script errors
+    clean_account_id = int(account_id) if str(account_id).isdigit() else account_id
+    
     broker_payload = {
-        "accountId": int(account_id) if str(account_id).isdigit() else account_id,
-        "accountSpec": f"DEMO{account_id}" if "demo" in BROKER_API_URL else str(account_id),
+        "accountId": clean_account_id,
+        "accountSpec": str(account_id),
         "symbol": str(symbol).upper(),
         "action": "Buy" if "buy" in action else "Sell",
         "orderQty": int(quantity),
