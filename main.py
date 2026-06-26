@@ -25,7 +25,7 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     # 2. Extract action signals flexibly from the data payload
     action = str(payload.get("data", "buy")).lower()
     symbol = payload.get("symbol", "ESU2026")
-    quantity = payload.get("quantity", 1)
+    quantity = payload.get("quantity", 2)
     
     # 3. Pull target broker account variables from your multiple account block
     accounts_list = payload.get("multiple_accounts", [])
@@ -36,8 +36,8 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     broker_token = accounts_list[0].get("token")
     account_id = accounts_list[0].get("account_id")
     
-    # 4. Corrected Domain URL for Lucid's Live/Simulation Tradovate API Architecture
-    BROKER_API_URL = "https://api.lucidat.com/v1/order/placeorder" 
+    # 4. Master Live Production URL for Tradovate API Architecture
+    BROKER_API_URL = "https://api.tradovate.com/v1/order/placeorder" 
     
     headers = {
         "Authorization": f"Bearer {broker_token}",
