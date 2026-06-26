@@ -46,10 +46,10 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     symbol = payload.get("symbol", "ESU2026")
     quantity = payload.get("quantity", 2)
     
-    # Explicitly list both accounts as the default array if not passed by TV
+    # Explicitly list both of your fresh new account IDs as the default array if not passed by TV
     accounts_list = payload.get("multiple_accounts", [])
     if not accounts_list:
-        accounts_list = [{"account_id": "LFE10075686900001"}, {"account_id": "LFE10075686900002"}]
+        accounts_list = [{"account_id": "LFE10075686900004"}, {"account_id": "LFE10075686900003"}]
     
     # Fetch live authentication token
     broker_token = get_tradovate_token()
