@@ -3,44 +3,72 @@ from typing import Dict, Any
 import uvicorn
 import requests
 
-app = FastAPI(title="Direct Master Token Copy-Trader")
+app = FastAPI(title="Lucid Multi-Account Trade Copier")
 
-# Security key protecting your webhook door from the outside world
+# Security token to secure your webhook from unauthorized external hits
 API_TOKEN = "VvOIjUt332XVdUeoX8Qmmw"
 
-# =========================================================================
-# PASTE YOUR TEMPORARY ACCESSTOKEN HERE (Gleaned from the platform network tab)
-# =========================================================================
-LIVE_BROKER_BEARER_TOKEN = "PASTE_YOUR_ACTUAL_TRADOVATE_SESSION_TOKEN_HERE"
-
+# Terminal Login Credentials
+TRADOVATE_USER = "LTT4K26QL4G"
+TRADOVATE_PASS = "V^58AvQ0aOqo6"
+TRADOVATE_APP_ID = "Tradovate Pulse"  # Direct white-label terminal gateway bypass
 BASE_API_URL = "https://demo.tradovateapi.com"
+
+def get_tradovate_token():
+    """Requests a fresh session token from the broker gateway."""
+    auth_url = f"{BASE_API_URL}/v1/auth/accesstokenrequest"
+    auth_payload = {
+        "name": TRADOVATE_USER,
+        "password": TRADOVATE_PASS,
+        "appId": TRADOVATE_APP_ID,
+        "appVersion": "1.0"
+    }
+    try:
+        response = requests.post(auth_url, json=auth_payload, timeout=5)
+        if response.status_code in [200, 201]:
+            return response.json().get("accessToken")
+        print(f"Auth Failed Status: {response.status_code} | Reason: {response.text}")
+        return None
+    except Exception as e:
+        print(f"Auth Request Exception: {str(e)}")
+        return None
 
 @app.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_tradingview_webhook(payload: Dict[str, Any]):
+    # Validate the TradingView secret token
     incoming_token = payload.get("token")
     if incoming_token != API_TOKEN:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
     
-    print(f"Validated Alert Received! Routing to Multi-Account Chain: {payload}")
+    print(f"Alert Received! Processing Payload: {payload}")
     
     action = str(payload.get("data", "buy")).lower()
     symbol = payload.get("symbol", "ESU2026")
     quantity = payload.get("quantity", 2)
     
+    # Explicitly list both accounts as the default array if not passed by TV
     accounts_list = payload.get("multiple_accounts", [])
     if not accounts_list:
         accounts_list = [{"account_id": "LFE10075686900001"}, {"account_id": "LFE10075686900002"}]
     
+    # Fetch live authentication token
+    broker_token = get_tradovate_token()
+    if not broker_token:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Broker auth rejected.")
+        
     BROKER_API_URL = f"{BASE_API_URL}/v1/order/placeorder" 
     headers = {
-        "Authorization": f"Bearer {LIVE_BROKER_BEARER_TOKEN}",
+        "Authorization": f"Bearer {broker_token}",
         "Content-Type": "application/json"
     }
     
     results = []
+    
+    # Loop through every account and execute orders simultaneously
     for acc in accounts_list:
         current_id = acc.get("account_id")
         
+        # Format the account ID dynamically for the API handler
         clean_account_id = current_id
         if str(current_id).isdigit():
             clean_account_id = int(current_id)
@@ -56,14 +84,14 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
         }
         
         try:
-            print(f"Direct Route Executing -> Target: {current_id} | Action: {broker_payload['action']}")
+            print(f"Sending Order -> Account: {current_id} | Action: {broker_payload['action']}")
             response = requests.post(BROKER_API_URL, json=broker_payload, headers=headers, timeout=5)
-            print(f"Account {current_id} Result Status: {response.status_code} | Msg: {response.text}")
+            print(f"Account {current_id} Response: {response.status_code} | {response.text}")
             results.append({"account": current_id, "status": response.status_code, "response": response.text})
         except Exception as e:
             results.append({"account": current_id, "error": str(e)})
             
-    return {"status": "direct_processed", "summary": results}
+    return {"status": "multi_executed", "details": results}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
