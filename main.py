@@ -11,17 +11,14 @@ API_TOKEN = "VvOIjUt332XVdUeoX8Qmmw"
 # Terminal Login Credentials
 TRADOVATE_USER = "LTT4K26QL4G"
 TRADOVATE_PASS = "V^58AvQ0aOqo6"
-TRADOVATE_APP_ID = "Tradovate Pulse"  # Direct white-label terminal gateway bypass
 BASE_API_URL = "https://demo.tradovateapi.com"
 
 def get_tradovate_token():
-    """Requests a fresh session token from the broker gateway."""
+    """Requests a fresh session token using raw partner integration schema."""
     auth_url = f"{BASE_API_URL}/v1/auth/accesstokenrequest"
     auth_payload = {
         "name": TRADOVATE_USER,
-        "password": TRADOVATE_PASS,
-        "appId": TRADOVATE_APP_ID,
-        "appVersion": "1.0"
+        "password": TRADOVATE_PASS
     }
     try:
         response = requests.post(auth_url, json=auth_payload, timeout=5)
@@ -46,7 +43,7 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     symbol = payload.get("symbol", "ESU2026")
     quantity = payload.get("quantity", 2)
     
-    # Explicitly list both of your fresh new account IDs as the default array if not passed by TV
+    # Fallback to your two fresh account numbers if not specified in incoming payload array
     accounts_list = payload.get("multiple_accounts", [])
     if not accounts_list:
         accounts_list = [{"account_id": "LFE10075686900004"}, {"account_id": "LFE10075686900003"}]
