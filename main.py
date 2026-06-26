@@ -14,17 +14,23 @@ TRADOVATE_PASS = "V^58AvQ0aOqo6"
 BASE_API_URL = "https://demo.tradovateapi.com"
 
 def get_tradovate_token():
-    """Requests a fresh session token using raw partner integration schema."""
+    """Requests a fresh session token using mandatory gateway parameters."""
     auth_url = f"{BASE_API_URL}/v1/auth/accesstokenrequest"
+    
+    # Restoring the mandatory layout keys with the universal web ID
     auth_payload = {
         "name": TRADOVATE_USER,
-        "password": TRADOVATE_PASS
+        "password": TRADOVATE_PASS,
+        "appId": "Tradovate Trader",
+        "appVersion": "1.0"
     }
     try:
         response = requests.post(auth_url, json=auth_payload, timeout=5)
         if response.status_code in [200, 201]:
             return response.json().get("accessToken")
-        print(f"Auth Failed Status: {response.status_code} | Reason: {response.text}")
+        
+        # CRITICAL: This will print the EXACT reason Tradovate is saying no
+        print(f"!!! TRADOVATE REJECTION REASON !!! Status: {response.status_code} | Text: {response.text}")
         return None
     except Exception as e:
         print(f"Auth Request Exception: {str(e)}")
@@ -32,7 +38,6 @@ def get_tradovate_token():
 
 @app.post("/webhook", status_code=status.HTTP_200_OK)
 async def receive_tradingview_webhook(payload: Dict[str, Any]):
-    # Validate the TradingView secret token
     incoming_token = payload.get("token")
     if incoming_token != API_TOKEN:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token.")
@@ -43,12 +48,10 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     symbol = payload.get("symbol", "ESU2026")
     quantity = payload.get("quantity", 2)
     
-    # Fallback to your two fresh account numbers if not specified in incoming payload array
     accounts_list = payload.get("multiple_accounts", [])
     if not accounts_list:
         accounts_list = [{"account_id": "LFE10075686900004"}, {"account_id": "LFE10075686900003"}]
     
-    # Fetch live authentication token
     broker_token = get_tradovate_token()
     if not broker_token:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Broker auth rejected.")
@@ -60,12 +63,8 @@ async def receive_tradingview_webhook(payload: Dict[str, Any]):
     }
     
     results = []
-    
-    # Loop through every account and execute orders simultaneously
     for acc in accounts_list:
         current_id = acc.get("account_id")
-        
-        # Format the account ID dynamically for the API handler
         clean_account_id = current_id
         if str(current_id).isdigit():
             clean_account_id = int(current_id)
